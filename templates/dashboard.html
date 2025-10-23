@@ -1,0 +1,96 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Workstation Queue Dashboard v2</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        h1, h2 { color: #333; }
+        table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+        th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+        form { margin-top: 30px; }
+        input, select { margin: 5px; padding: 5px; }
+        button { padding: 8px 12px; }
+    </style>
+</head>
+<body>
+    <h1>Workstation Queue Dashboard v2</h1>
+
+    <h2>📊 Workstation Usage Over Time</h2>
+    <div id="usageChart" style="height: 500px;"></div>
+
+    <h2>📋 Live Queue of Pending Requests</h2>
+    <table id="queueTable">
+        <thead>
+            <tr>
+                <th>Timestamp</th>
+                <th>Name</th>
+                <th>Role</th>
+                <th>Workstation</th>
+                <th>Start Time</th>
+                <th>End Time</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr><td>2024-04-01 09:00</td><td>Alice</td><td>PhD</td><td>WS-01</td><td>2024-04-01T09:00</td><td>2024-04-01T12:00</td><td>Pending</td></tr>
+            <tr><td>2024-04-01 10:00</td><td>Bob</td><td>Master</td><td>WS-02</td><td>2024-04-01T13:00</td><td>2024-04-01T15:00</td><td>Pending</td></tr>
+        </tbody>
+    </table>
+
+    <h2>📝 Submit a New Workstation Request</h2>
+    <form id="requestForm">
+        <input name="name" placeholder="Name" required>
+        <select name="role">
+            <option>Researcher</option>
+            <option>PhD</option>
+            <option>Master</option>
+        </select>
+        <input name="workstation" placeholder="Workstation ID (e.g., WS-01)" required>
+        <input name="startTime" type="datetime-local" required>
+        <input name="endTime" type="datetime-local" required>
+        <button type="submit">Submit Request</button>
+    </form>
+
+    <script>
+        const usageData = [
+            {start: "2024-04-01T09:00", end: "2024-04-01T12:00", workstation: "WS-01", name: "Alice", color: "#1f77b4"},
+            {start: "2024-04-01T13:00", end: "2024-04-01T15:00", workstation: "WS-02", name: "Bob", color: "#ff7f0e"},
+            {start: "2024-04-02T10:00", end: "2024-04-02T14:00", workstation: "WS-03", name: "Charlie", color: "#2ca02c"}
+        ];
+
+        const tasks = usageData.map(function(item) {
+            return {
+                x: [item.start, item.end],
+                y: [item.workstation, item.workstation],
+                type: 'scatter',
+                mode: 'lines',
+                name: item.name,
+                line: { color: item.color, width: 20 },
+                hoverinfo: 'name'
+            };
+        });
+
+        Plotly.newPlot('usageChart', tasks, {
+            title: 'Workstation Usage Timeline',
+            xaxis: { title: 'Time', type: 'date' },
+            yaxis: { title: 'Workstations', type: 'category' }
+        });
+
+        document.getElementById("requestForm").addEventListener("submit", async function(e) {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const payload = Object.fromEntries(formData.entries());
+            await fetch("http://127.0.0.1:5000/submit-request", {
+                method: "POST",
+                body: JSON.stringify(payload),
+                headers: { "Content-Type": "application/json" }
+            });
+            alert("Request submitted successfully!");
+            e.target.reset();
+        });
+    </script>
+</body>
+</html>
