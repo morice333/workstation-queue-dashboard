@@ -6,6 +6,7 @@ import sendgrid
 from sendgrid.helpers.mail import Mail
 from flask_migrate import Migrate
 from datetime import datetime, timedelta
+import os
 
 role_durations = {
     "Researcher": timedelta(days=120),
@@ -149,7 +150,7 @@ def submit():
     db.session.commit()
 
     try:
-        sg = sendgrid.SendGridAPIClient(api_key='SG.xmPqnvABT8yiinCuLDkeNA.r-iwmq07NUr4_Q5juhscfhiyNN_txMoqLfNEZnrZUOECopied!')
+        sg = sendgrid.SendGridAPIClient(api_key=os.getenv('SENDGRID_API_KEY'))
         message = Mail(
             from_email='maugut@kth.se',
             to_emails='maugut@kth.se',
