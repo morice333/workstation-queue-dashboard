@@ -2,11 +2,12 @@ from flask import Flask, render_template, request, redirect, url_for, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
-import sendgrid
-from sendgrid.helpers.mail import Mail
 from flask_migrate import Migrate
 from datetime import datetime, timedelta
 import os
+import smtplib
+from email.mime.text import MIMEText
+
 
 role_durations = {
     "Researcher": timedelta(days=120),
@@ -120,6 +121,39 @@ def logout():
     logout_user()
     return redirect(url_for('login'))
 
+
+def send_email(name, role, start_time, end_time, status):
+    import os
+    import smtplib
+    from email.mime.text import MIMEText
+
+    sender = os.getenv('GMAIL_USER')
+    password = os.getenv('GMAIL_PASS')
+    receiver = 'maugut@kth.se'
+
+    subject = "New Workstation Request Submitted"
+    body = f"""A new workstation request has been submitted:
+Name: {name}
+Role: {role}
+Start Time: {start_time}
+End Time: {end_time}
+Status: {status}
+"""
+
+    msg = MIMEText(body)
+    msg['Subject'] = subject
+    msg['From'] = sender
+    msg['To'] = receiver
+
+    try:
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(sender, password)
+            server.sendmail(sender, receiver, msg.as_string())
+        print("Email sent successfully")
+    except Exception as e:
+        print(f"Email sending failed: {e}")
+    return jsonify({'status': 'email_failed'})
+
 @app.route('/submit', methods=['POST'])
 @login_required
 def submit():
@@ -149,26 +183,14 @@ def submit():
     db.session.add(new_request)
     db.session.commit()
 
-    try:
-        sg = sendgrid.SendGridAPIClient(api_key=os.getenv('SENDGRID_API_KEY'))
-        message = Mail(
-            from_email='maugut@kth.se',
-            to_emails='maugut@kth.se',
-            subject='New Workstation Request Submitted',
-            plain_text_content=f"""A new workstation request has been submitted:
 
-Name: {new_request.name}
-Role: {new_request.role}
-Start Time: {new_request.start_time}
-End Time: {new_request.end_time}
-Status: {new_request.status}
-"""
-        )
-        sg.send(message)
-    except Exception as e:
-        print(f"Email sending failed: {e}")
+# Send email via Gmail SMTP
+    send_email(new_request.name, new_request.role, new_request.start_time, new_request.end_time, new_request.status)
 
+
+# Return JSON response
     return jsonify({'status': 'success'})
+
 
 @app.route('/update_status/<int:request_id>', methods=['POST'])
 @login_required
@@ -222,4 +244,4 @@ if __name__ == '__main__':
 
         db.session.commit()
 
-    app.run(debug=True, use_reloader=False)
+    app.run(debug=False, use_reloader=False)

@@ -2,10 +2,20 @@ from flask import Flask, render_template, request, redirect, url_for, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
-from datetime import datetime
-import sendgrid
-from sendgrid.helpers.mail import Mail
 from flask_migrate import Migrate
+from datetime import datetime, timedelta
+import os
+import smtplib
+from email.mime.text import MIMEText
+
+
+role_durations = {
+    "Researcher": timedelta(days=120),
+    "PhD": timedelta(days=90),
+    "Master": timedelta(days=150),
+    "Short term": timedelta(days=14)
+}
+
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your_secret_key'
@@ -32,6 +42,7 @@ class Request(db.Model):
     end_time = db.Column(db.String(50))
     status = db.Column(db.String(50), default="Pending")
     workstation = db.Column(db.String(50))  # <-- Add this line
+    renewals = db.Column(db.Integer)  # <-- Add this line
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
@@ -42,8 +53,8 @@ def dashboard():
     # Remove completed requests
     Request.query.filter_by(status='Completed').delete()
     db.session.commit()
-    pending_requests = Request.query.filter_by(status='Pending').order_by(Request.timestamp.desc()).all()
-    running_requests = Request.query.filter_by(status='Running').order_by(Request.timestamp.desc()).all()
+    pending_requests = (Request.query.filter_by(status='Pending').order_by(Request.role.asc(),Request.timestamp.asc()).all())
+    running_requests = (Request.query.filter_by(status='Running').order_by(Request.role.asc(),Request.timestamp.asc()).all())
     chart_data = []
     for req in running_requests:
         chart_data.append({
@@ -51,6 +62,7 @@ def dashboard():
             "workstation": req.workstation or "",
             "start": str(req.start_time),
             "end": str(req.end_time),
+            "renewals": req.renewals or "",
             "color": "blue" if req.role == "PhD" else "orange" if req.role == "Master" else "green"
         })
     return render_template('dashboard.html',
@@ -66,8 +78,8 @@ def admin_dashboard():
     if current_user.role != 'admin':
         return redirect(url_for('dashboard'))
     requests = Request.query.order_by(Request.timestamp.desc()).all()
-    running_requests = Request.query.filter_by(status='Running').order_by(Request.timestamp.desc()).all()
-    pending_requests = Request.query.filter_by(status='Pending').order_by(Request.timestamp.desc()).all()
+    running_requests = (Request.query.filter_by(status='Running').order_by(Request.role.asc(),Request.timestamp.asc()).all())
+    pending_requests = (Request.query.filter_by(status='Pending').order_by(Request.role.asc(),Request.timestamp.asc()).all())
     chart_data = []
     for req in requests:
         if req.status == 'Running':
@@ -76,6 +88,7 @@ def admin_dashboard():
                 "workstation": req.workstation or "",
                 "start": str(req.start_time),
                 "end": str(req.end_time),
+                "renewals": req.renewals or "",
                 "color": "blue" if req.role == "PhD" else "orange" if req.role == "Master" else "green"
             })
     return render_template('admin_dashboard.html', requests=pending_requests , running_requests=running_requests,  chart_data=chart_data)
@@ -108,6 +121,39 @@ def logout():
     logout_user()
     return redirect(url_for('login'))
 
+
+def send_email(name, role, start_time, end_time, status):
+    import os
+    import smtplib
+    from email.mime.text import MIMEText
+
+    sender = os.getenv('GMAIL_USER')
+    password = os.getenv('GMAIL_PASS')
+    receiver = 'maugut@kth.se'
+
+    subject = "New Workstation Request Submitted"
+    body = f"""A new workstation request has been submitted:
+Name: {name}
+Role: {role}
+Start Time: {start_time}
+End Time: {end_time}
+Status: {status}
+"""
+
+    msg = MIMEText(body)
+    msg['Subject'] = subject
+    msg['From'] = sender
+    msg['To'] = receiver
+
+    try:
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(sender, password)
+            server.sendmail(sender, receiver, msg.as_string())
+        print("Email sent successfully")
+    except Exception as e:
+        print(f"Email sending failed: {e}")
+    return jsonify({'status': 'email_failed'})
+
 @app.route('/submit', methods=['POST'])
 @login_required
 def submit():
@@ -137,26 +183,14 @@ def submit():
     db.session.add(new_request)
     db.session.commit()
 
-    try:
-        sg = sendgrid.SendGridAPIClient(api_key='SG.xmPqnvABT8yiinCuLDkeNA.r-iwmq07NUr4_Q5juhscfhiyNN_txMoqLfNEZnrZUOECopied!')
-        message = Mail(
-            from_email='maugut@kth.se',
-            to_emails='maugut@kth.se',
-            subject='New Workstation Request Submitted',
-            plain_text_content=f"""A new workstation request has been submitted:
 
-Name: {new_request.name}
-Role: {new_request.role}
-Start Time: {new_request.start_time}
-End Time: {new_request.end_time}
-Status: {new_request.status}
-"""
-        )
-        sg.send(message)
-    except Exception as e:
-        print(f"Email sending failed: {e}")
+# Send email via Gmail SMTP
+    send_email(new_request.name, new_request.role, new_request.start_time, new_request.end_time, new_request.status)
 
+
+ # Return JSON response
     return jsonify({'status': 'success'})
+
 
 @app.route('/update_status/<int:request_id>', methods=['POST'])
 @login_required
@@ -168,6 +202,19 @@ def update_status(request_id):
     new_workstation = request.form.get('workstation')
     new_start_time = request.form.get('start_time')
     new_end_time = request.form.get('end_time')
+    new_renewals = request.form.get('renewals')
+
+    # Enforce maximum duration based on role
+    try:
+        start_dt = datetime.strptime(new_start_time, "%Y-%m-%d")
+        end_dt = datetime.strptime(new_end_time, "%Y-%m-%d")
+        max_duration = role_durations.get(current_user.role, timedelta(days=60))
+        if end_dt - start_dt > max_duration:
+            end_dt = start_dt + max_duration
+            new_end_time = end_dt.strftime("%Y-%m-%d")
+    except Exception as e:
+        print(f"Date parsing error: {e}")
+        
     if new_status == 'Completed':
         db.session.delete(req)
     else:
@@ -176,6 +223,7 @@ def update_status(request_id):
             req.workstation = new_workstation
             req.start_time = new_start_time
             req.end_time = new_end_time
+            req.renewals = new_renewals
     db.session.commit()
     return redirect(url_for('admin_dashboard'))
 
@@ -196,4 +244,4 @@ if __name__ == '__main__':
 
         db.session.commit()
 
-    app.run(debug=True, use_reloader=False)
+    app.run(debug=False, use_reloader=False)
