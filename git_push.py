@@ -15,9 +15,16 @@ cd C:\\Users\\maugut\\Morice\\01_KTH\\16_Department\\Server\\Scripts
 !git add .
 
 # Step 4: Commit the change
-!git commit -m "Add hpt_queing.html to docs folder"
+!git commit -m "Add app.py to docs folder"
 
 # Step 5: Link Remote and Push
-!git remote add origin https://github.com/<your-username>/<repo-name>.git
+!git remote add origin https://github.com/morice333/workstation-queue-dashboard.git 
 !git branch -M main
 !git push origin main
+
+#######################################
+# If necessary needs to pull first
+# !git pull origin main --allow-unrelated-histories
+# If you want your local code to completely replace what’s on GitHub:
+# !git push origin main --force
+#######################################

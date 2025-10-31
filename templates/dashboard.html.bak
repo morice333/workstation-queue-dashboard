@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Workstation Queue Dashboard v2</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        h1 { font-size: 24px; margin-bottom: 10px; }
+        h2, h3 { margin-top: 20px; color: #333; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+        th { background-color: #f4f4f4; }
+        .form-section { margin-top: 30px; }
+        .form-section input, .form-section select { margin-right: 10px; padding: 5px; }
+        .submit-btn { padding: 6px 12px; background-color: #4CAF50; color: white; border: none; cursor: pointer; }
+        .submit-btn:hover { background-color: #45a049; }
+    </style>
+</head>
+<body>
+    <h1>Workstation Queue Dashboard</h1>
+
+    <h2>📊 Workstation Usage Over Time</h2>
+    <div id="usageChart" style="width:100%;height:400px;"></div>
+
+    <script>
+        var chartData = {{ chart_data | tojson }};
+        var data = chartData.map(item => ({
+            x: [item.start, item.end],
+            y: [item.workstation, item.workstation],
+            mode: 'lines',
+            name: item.name,
+            line: { color: item.color, width: 10 }
+        }));
+
+        var layout = {
+            title: 'Workstation Usage Timeline (Running Only)',
+            xaxis: { title: 'Time' },
+            yaxis: { title: 'Workstations' },
+            showlegend: true
+        };
+
+        Plotly.newPlot('usageChart', data, layout);
+    </script>
+
+    <h3>🖥️ Running Workstations</h3>
+    <table>
+        <tr><th>Timestamp</th><th>Name</th><th>Role</th><th>Workstation</th><th>Start Time</th><th>End Time</th><th>Status</th></tr>
+        {% for req in running_requests %}
+        <tr>
+            <td>{{ req.timestamp.strftime('%Y-%m-%d %H:%M') }}</td>
+            <td>{{ req.name }}</td>
+            <td>{{ req.role }}</td>
+            <td>{{ req.workstation }}</td>
+            <td>{{ req.start_time }}</td>
+            <td>{{ req.end_time }}</td>
+            <td>{{ req.status }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    <h3>📋 Live Queue of Pending Requests</h3>
+    <table>
+        <tr><th>Timestamp</th><th>Name</th><th>Role</th><th>Start Time</th><th>End Time</th><th>Status</th></tr>
+        {% for req in pending_requests %}
+        <tr>
+            <td>{{ req.timestamp.strftime('%Y-%m-%d %H:%M') }}</td>
+            <td>{{ req.name }}</td>
+            <td>{{ req.role }}</td>
+            <td>{{ req.start_time }}</td>
+            <td>{{ req.end_time }}</td>
+            <td>{{ req.status }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+<div class="form-section">
+<h3>📝 Submit a New Workstation Request</h3>
+<form id="requestForm">
+<input name="name" placeholder="Name" required="" type="text"/>
+<select name="role">
+<option value="Researcher">Researcher</option>
+<option value="PhD">PhD</option>
+<option value="Master">Master</option>
+</select>
+<input name="startTime" required="" type="date"/>
+<input name="endTime" required="" type="date"/>
+<button class="submit-btn" type="submit">Submit Request</button>
+</form>
+</div>
+<script>
+        document.getElementById('requestForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const data = {
+                name: this.name.value,
+                role: this.role.value,
+                startTime: this.startTime.value,
+                endTime: this.endTime.value
+            };
+
+            fetch('/submit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            })
+            .then(response => response.json())
+            .then(result => {
+                alert('Request submitted successfully!');
+                location.reload();
+            })
+            .catch(error => console.error('Error:', error));
+        });
+    </script>
+</body>
+</html>

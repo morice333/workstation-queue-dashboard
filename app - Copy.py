@@ -1,0 +1,183 @@
+from flask import Flask, render_template, request, redirect, url_for, jsonify
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from werkzeug.security import generate_password_hash, check_password_hash
+from datetime import datetime
+import sendgrid
+from sendgrid.helpers.mail import Mail
+from flask_migrate import Migrate
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'your_secret_key'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///db.sqlite'
+db = SQLAlchemy(app)
+migrate = Migrate(app, db)
+
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(150), unique=True)
+    password = db.Column(db.String(150))
+    role = db.Column(db.String(50), default='user')
+
+class Request(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    name = db.Column(db.String(100))
+    role = db.Column(db.String(50))
+    start_time = db.Column(db.String(50))
+    end_time = db.Column(db.String(50))
+    status = db.Column(db.String(50), default="Pending")
+    workstation = db.Column(db.String(50))  # <-- Add this line
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
+
+@app.route('/')
+@login_required
+def dashboard():
+    # Remove completed requests
+    Request.query.filter_by(status='Completed').delete()
+    db.session.commit()
+    pending_requests = Request.query.filter_by(status='Pending').order_by(Request.timestamp.desc()).all()
+    running_requests = Request.query.filter_by(status='Running').order_by(Request.timestamp.desc()).all()
+    chart_data = []
+    for req in running_requests:
+        chart_data.append({
+            "name": req.name or "",
+            "workstation": req.workstation or "",
+            "start": str(req.start_time),
+            "end": str(req.end_time),
+            "color": "blue" if req.role == "PhD" else "orange" if req.role == "Master" else "green"
+        })
+    return render_template('dashboard.html',
+                           pending_requests=pending_requests,
+                           running_requests=running_requests,
+                           chart_data=chart_data)
+
+@app.route('/admin')
+@login_required
+def admin_dashboard():
+    print("Is user authenticated?", current_user.is_authenticated)
+    print("Current user role:", current_user.role)   
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+    requests = Request.query.order_by(Request.timestamp.desc()).all()
+    running_requests = Request.query.filter_by(status='Running').order_by(Request.timestamp.desc()).all()
+    pending_requests = Request.query.filter_by(status='Pending').order_by(Request.timestamp.desc()).all()
+    chart_data = []
+    for req in requests:
+        if req.status == 'Running':
+            chart_data.append({
+                "name": req.name or "",
+                "workstation": req.workstation or "",
+                "start": str(req.start_time),
+                "end": str(req.end_time),
+                "color": "blue" if req.role == "PhD" else "orange" if req.role == "Master" else "green"
+            })
+    return render_template('admin_dashboard.html', requests=pending_requests , running_requests=running_requests,  chart_data=chart_data)
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        user = User.query.filter_by(username=request.form['username']).first()
+        if user and check_password_hash(user.password, request.form['password']):
+            login_user(user)
+            if user.role == 'admin':
+                return redirect(url_for('admin_dashboard'))
+            return redirect(url_for('dashboard'))
+    return render_template('login.html')
+
+
+# @app.route('/register', methods=['GET', 'POST'])
+# def register():
+#     if request.method == 'POST':
+#         hashed_pw = generate_password_hash(request.form['password'], method='pbkdf2:sha256')
+#         new_user = User(username=request.form['username'], password=hashed_pw)
+#         db.session.add(new_user)
+#         db.session.commit()
+#         return redirect(url_for('login'))
+#     return render_template('register.html')
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for('login'))
+
+@app.route('/submit', methods=['POST'])
+@login_required
+def submit():
+    data = request.get_json()
+    new_request = Request(
+        name=data['name'],
+        role=data['role'],
+        start_time=data['startTime'],
+        end_time=data['endTime']
+    )
+    db.session.add(new_request)
+    db.session.commit()
+
+    try:
+        sg = sendgrid.SendGridAPIClient(api_key='SG.xmPqnvABT8yiinCuLDkeNA.r-iwmq07NUr4_Q5juhscfhiyNN_txMoqLfNEZnrZUOECopied!')
+        message = Mail(
+            from_email='maugut@kth.se',
+            to_emails='maugut@kth.se',
+            subject='New Workstation Request Submitted',
+            plain_text_content=f"""A new workstation request has been submitted:
+
+Name: {new_request.name}
+Role: {new_request.role}
+Start Time: {new_request.start_time}
+End Time: {new_request.end_time}
+Status: {new_request.status}
+"""
+        )
+        sg.send(message)
+    except Exception as e:
+        print(f"Email sending failed: {e}")
+
+    return jsonify({'status': 'success'})
+
+@app.route('/update_status/<int:request_id>', methods=['POST'])
+@login_required
+def update_status(request_id):
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+    req = Request.query.get_or_404(request_id)
+    new_status = request.form.get('status')
+    new_workstation = request.form.get('workstation')
+    new_start_time = request.form.get('start_time')
+    new_end_time = request.form.get('end_time')
+    if new_status == 'Completed':
+        db.session.delete(req)
+    else:
+        req.status = new_status
+        if new_workstation:  # Only update if provided
+            req.workstation = new_workstation
+            req.start_time = new_start_time
+            req.end_time = new_end_time
+    db.session.commit()
+    return redirect(url_for('admin_dashboard'))
+
+if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()
+
+        # Create default users
+        if not User.query.filter_by(username='admin').first():
+            admin_pw = generate_password_hash('secret123', method='pbkdf2:sha256')
+            admin_user = User(username='admin', password=admin_pw, role='admin')
+            db.session.add(admin_user)
+
+        if not User.query.filter_by(username='hpt').first():
+            hpt_pw = generate_password_hash('hpt', method='pbkdf2:sha256')
+            hpt_user = User(username='hpt', password=hpt_pw, role='user')
+            db.session.add(hpt_user)
+
+        db.session.commit()
+
+    app.run(debug=True, use_reloader=False)
