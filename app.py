@@ -80,7 +80,7 @@ def get_gmail_service():
 # Email sending function using Gmail API
 def send_email(name, role, start_time, end_time, status):
     service = get_gmail_service()
-    sender = 'your_email@gmail.com'
+    sender = 'moriceg33@gmail.com'
     receiver = 'maugut@kth.se'  
     subject = "New Workstation Request Submitted"
     body = f"""A new workstation request has been submitted:
