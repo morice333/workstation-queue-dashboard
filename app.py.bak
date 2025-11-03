@@ -1,22 +1,23 @@
+
+import os
+import base64
 from flask import Flask, render_template, request, redirect, url_for, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_migrate import Migrate
 from datetime import datetime, timedelta
-import os
-import smtplib
 from email.mime.text import MIMEText
 
+# Gmail API imports
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
 
-role_durations = {
-    "Researcher": timedelta(days=120),
-    "PhD": timedelta(days=90),
-    "Master": timedelta(days=150),
-    "Short term": timedelta(days=14)
-}
+# Gmail API scope
+SCOPES = ['httpswww.googleapis.comauthgmail.send']
 
-
+# Flask app setup
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your_secret_key'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///db.sqlite'
@@ -27,7 +28,16 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 
-class User(UserMixin, db.Model):
+# Role durations
+role_durations = {
+    Researcher timedelta(days=120),
+    PhD timedelta(days=90),
+    Master timedelta(days=150),
+    Short term timedelta(days=14)
+}
+
+# Models
+class User(UserMixin, db.Model)
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(150), unique=True)
     password = db.Column(db.String(150))
@@ -41,12 +51,62 @@ class Request(db.Model):
     start_time = db.Column(db.String(50))
     end_time = db.Column(db.String(50))
     status = db.Column(db.String(50), default="Pending")
-    workstation = db.Column(db.String(50))  # <-- Add this line
-    renewals = db.Column(db.Integer)  # <-- Add this line
+    workstation = db.Column(db.String(50)) 
+    renewals = db.Column(db.Integer)  
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
 
+# Gmail API helper
+def get_gmail_service()
+    creds = None
+    token_path = 'token.json'
+    credentials_path = 'credentials.json'
+
+    if os.path.exists(token_path)
+        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
+
+    if not creds or not creds.valid
+        if creds and creds.expired and creds.refresh_token
+            creds.refresh(Request())
+        else
+            flow = InstalledAppFlow.from_client_secrets_file(credentials_path, SCOPES)
+            creds = flow.run_local_server(port=0)
+        with open(token_path, 'w') as token_file
+            token_file.write(creds.to_json())
+
+    return build('gmail', 'v1', credentials=creds)
+
+# Email sending function using Gmail API
+def send_email(name, role, start_time, end_time, status)
+    service = get_gmail_service()
+    sender = 'your_email@gmail.com'
+    receiver = 'maugut@kth.se'
+    subject = New Workstation Request Submitted
+    body = f
+    A new workstation request has been submitted
+    Name {name}
+    Role {role}
+    Start Time {start_time}
+    End Time {end_time}
+    Status {status}
+    
+
+    message = MIMEText(body)
+    message['to'] = receiver
+    message['from'] = sender
+    message['subject'] = subject
+
+    raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
+
+    try
+        service.users().messages().send(userId='me', body={'raw' raw_message}).execute()
+        print(Email sent successfully via Gmail API)
+    except Exception as e
+        print(fEmail sending failed {e})
+        return jsonify({'status' 'email_failed'})
+
+# Routes remain unchanged except email sending now uses Gmail API
 @app.route('/')
 @login_required
 def dashboard():
@@ -188,7 +248,7 @@ def submit():
     send_email(new_request.name, new_request.role, new_request.start_time, new_request.end_time, new_request.status)
 
 
- # Return JSON response
+# Return JSON response
     return jsonify({'status': 'success'})
 
 
