@@ -59,13 +59,14 @@ def load_user(user_id):
 
 # Gmail API helper
 def get_gmail_service():
-    creds = None
-    token_path = 'token.json'
-    credentials_path = 'credentials.json'
-
-    if os.path.exists(token_path):
-        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
-
+    creds_data = {
+        "client_id": os.getenv("GOOGLE_CLIENT_ID"),
+        "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
+        "refresh_token": os.getenv("GOOGLE_REFRESH_TOKEN"),
+        "type": "authorized_user"
+    }
+    creds = Credentials.from_authorized_user_info(info=creds_data, scopes=SCOPES)
+    print("Refresh Token:", creds.refresh_token)
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
