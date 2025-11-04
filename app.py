@@ -71,8 +71,12 @@ def get_gmail_service():
     if not creds_data["client_id"] or not creds_data["client_secret"] or not creds_data["refresh_token"]:
         raise ValueError("Missing Google OAuth environment variables")
 
-    creds = Credentials.from_authorized_user_info(info=creds_data, scopes=SCOPES)
+    print("Client ID:", creds_data["client_id"])
+    print("Client Secret starts with:", creds_data["client_secret"][:5])
+    print("Refresh Token starts with:", creds_data["refresh_token"][:5])
 
+    creds = Credentials.from_authorized_user_info(info=creds_data, scopes=SCOPES)
+    print("Redirect URI configured for OAuth:", os.getenv("OAUTH_REDIRECT_URI"))
     # Refresh if expired
     if creds.expired and creds.refresh_token:
         creds.refresh(GoogleRequest())
