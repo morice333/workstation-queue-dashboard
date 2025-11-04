@@ -92,12 +92,18 @@ def get_gmail_service():
     print("Has refresh token:", bool(creds.refresh_token))
     
     # Attempt refresh if expired
+    print("Attempting token refresh with:")
+    print("Client ID:", creds.client_id)
+    print("Token URI:", creds.token_uri) 
+    
     if creds.expired and creds.refresh_token:
         try:
             creds.refresh(GoogleRequest())
             print("✅ Token refreshed successfully")
         except Exception as e:
+            import traceback
             print("❌ Token refresh failed:", e)
+            traceback.print_exc()
             
     # Build Gmail API service
     return build('gmail', 'v1', credentials=creds)
