@@ -1,6 +1,7 @@
 
 import os
 import base64
+import requests
 from flask import Flask, render_template, request, redirect, url_for, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
@@ -68,18 +69,37 @@ def get_gmail_service():
         "type": "authorized_user"
     }
 
+    # Check if environment variables are present
     if not creds_data["client_id"] or not creds_data["client_secret"] or not creds_data["refresh_token"]:
-        raise ValueError("Missing Google OAuth environment variables")
+        raise ValueError("❌ Missing Google OAuth environment variables")
 
+    # ✅ Debug prints for credentials
     print("Client ID:", creds_data["client_id"])
     print("Client Secret starts with:", creds_data["client_secret"][:5])
     print("Refresh Token starts with:", creds_data["refresh_token"][:5])
 
+    # ✅ Connectivity check
+    try:
+        r = requests.get("https://oauth2.googleapis.com/token", timeout=5)
+        print("Google token endpoint reachable:", r.status_code)
+    except Exception as e:
+        print("❌ Connectivity issue:", e)
+
+    # Create credentials object
     creds = Credentials.from_authorized_user_info(info=creds_data, scopes=SCOPES)
-    print("Redirect URI configured for OAuth:", os.getenv("OAUTH_REDIRECT_URI"))
-    # Refresh if expired
+    # ✅ Debug credential status
+    print("Credentials expired:", creds.expired)
+    print("Has refresh token:", bool(creds.refresh_token))
+    
+    # Attempt refresh if expired
     if creds.expired and creds.refresh_token:
-        creds.refresh(GoogleRequest())
+        try:
+            creds.refresh(GoogleRequest())
+            print("✅ Token refreshed successfully")
+        except Exception as e:
+            print("❌ Token refresh failed:", e)
+            
+    # Build Gmail API service
     return build('gmail', 'v1', credentials=creds)
 
 # Email sending function using Gmail API
