@@ -2,6 +2,7 @@
 import os
 import base64
 import requests
+import ssl
 from flask import Flask, render_template, request, redirect, url_for, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
@@ -77,7 +78,11 @@ def get_gmail_service():
     print("Client ID:", creds_data["client_id"])
     print("Client Secret starts with:", creds_data["client_secret"][:5])
     print("Refresh Token starts with:", creds_data["refresh_token"][:5])
-
+    print("SSL CA cert paths:", ssl.get_default_verify_paths())
+    
+    # Strip whitespace just in case
+    creds_data["client_secret"] = creds_data["client_secret"].strip()
+    creds_data["refresh_token"] = creds_data["refresh_token"].strip()
     # ✅ Connectivity check
     try:
         r = requests.get("https://oauth2.googleapis.com/token", timeout=5)
