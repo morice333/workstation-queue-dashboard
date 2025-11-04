@@ -261,7 +261,7 @@ def update_status(request_id):
     try:
         start_dt = datetime.strptime(new_start_time, "%Y-%m-%d")
         end_dt = datetime.strptime(new_end_time, "%Y-%m-%d")
-        max_duration = role_durations.get(current_user.role, timedelta(days=60))
+        max_duration = role_durations.get(req.role, timedelta(days=60))
         if end_dt - start_dt > max_duration:
             end_dt = start_dt + max_duration
             new_end_time = end_dt.strftime("%Y-%m-%d")
