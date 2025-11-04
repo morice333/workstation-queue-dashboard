@@ -13,6 +13,7 @@ from email.mime.text import MIMEText
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+from google.auth.transport.requests import Request as GoogleRequest
 
 # Gmail API scope
 SCOPES = ['https://www.googleapis.com/auth/gmail.send']
@@ -58,6 +59,7 @@ def load_user(user_id):
     return User.query.get(int(user_id))
 
 # Gmail API helper
+
 def get_gmail_service():
     creds_data = {
         "client_id": os.getenv("GOOGLE_CLIENT_ID"),
@@ -65,17 +67,15 @@ def get_gmail_service():
         "refresh_token": os.getenv("GOOGLE_REFRESH_TOKEN"),
         "type": "authorized_user"
     }
-    creds = Credentials.from_authorized_user_info(info=creds_data, scopes=SCOPES)
-    print("Refresh Token:", creds.refresh_token)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(credentials_path, SCOPES)
-            creds = flow.run_local_server(port=8080)  # Fixed port
-        with open(token_path, 'w') as token_file:
-            token_file.write(creds.to_json())
 
+    if not creds_data["client_id"] or not creds_data["client_secret"] or not creds_data["refresh_token"]:
+        raise ValueError("Missing Google OAuth environment variables")
+
+    creds = Credentials.from_authorized_user_info(info=creds_data, scopes=SCOPES)
+
+    # Refresh if expired
+    if creds.expired and creds.refresh_token:
+        creds.refresh(GoogleRequest())
     return build('gmail', 'v1', credentials=creds)
 
 # Email sending function using Gmail API
@@ -103,7 +103,7 @@ Status: {status}
         service.users().messages().send(userId='me', body={'raw': raw_message}).execute()
         print(f"Email sent successfully via Gmail API")
     except Exception as e:
-        print(f"Date parsing error: {e}")
+        print(f"Email sending error: {e}")
         return jsonify({'status': 'email_failed'})
     
 
