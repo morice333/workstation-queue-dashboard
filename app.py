@@ -3,13 +3,14 @@ import os
 import base64
 import requests
 import ssl
-from flask import Flask, render_template, request, redirect, url_for, jsonify
+from flask import Flask, render_template, request, redirect, url_for, jsonify, send_file, abort
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_migrate import Migrate
 from datetime import datetime, timedelta
 from email.mime.text import MIMEText
+from sqlalchemy.engine.url import make_url  # robust DB URI 
 
 # Gmail API imports
 from google.oauth2.credentials import Credentials
@@ -23,9 +24,69 @@ SCOPES = ['https://www.googleapis.com/auth/gmail.send']
 # Flask app setup
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your_secret_key'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///db.sqlite'
+
+
+# NEW: make sure the instance folder exists (Flask stores local files here)
+os.makedirs(app.instance_path, exist_ok=True)
+
+db_url = os.environ.get("DATABASE_URL", "sqlite:///db.sqlite")
+
+# Render sometimes provides postgres:// which SQLAlchemy wants as postgresql://
+if db_url.startswith("postgres://"):
+    db_url = db_url.replace("postgres://", "postgresql://", 1)
+
+app.config["SQLALCHEMY_DATABASE_URI"] = db_url
+print("DB URI in use:", app.config["SQLALCHEMY_DATABASE_URI"])
+
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
+
+
+# -----------------------------
+# (new) Helper to resolve sqlite path reliably
+# -----------------------------
+# --- keep BASEDIR as you already have it ---
+BASEDIR = os.path.abspath(os.path.dirname(__file__))
+
+def _resolve_sqlite_path(uri: str) -> str | None:
+    """
+    Return absolute path to the SQLite file if the URI is SQLite (not :memory:).
+    For relative DB URIs, check (in order):
+      1) Flask instance_path
+      2) folder where app.py lives (BASEDIR)
+      3) current working directory (CWD)
+    If none exists yet, prefer instance_path as canonical location.
+    """
+    from sqlalchemy.engine.url import make_url
+    try:
+        url = make_url(uri)
+    except Exception:
+        return None
+
+    if not url.drivername.startswith("sqlite"):
+        return None
+
+    db_part = url.database  # may be None, ':memory:', relative or absolute
+    if not db_part or db_part == ":memory:":
+        return None
+
+    # Absolute path? Use it directly.
+    if os.path.isabs(db_part):
+        return db_part
+
+    # Relative path -> build candidates
+    candidate_instance = os.path.abspath(os.path.join(app.instance_path, db_part))
+    candidate_basedir  = os.path.abspath(os.path.join(BASEDIR, db_part))
+    candidate_cwd      = os.path.abspath(os.path.join(os.getcwd(), db_part))
+
+    # Return the first existing path
+    for p in (candidate_instance, candidate_basedir, candidate_cwd):
+        if os.path.exists(p):
+            return p
+
+    # None exist yet -> prefer instance folder
+    return candidate_instance
+
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -189,6 +250,78 @@ def admin_dashboard():
             })
     return render_template('admin_dashboard.html', requests=pending_requests , running_requests=running_requests,  chart_data=chart_data)
 
+
+# -----------------------------
+# (new) Admin-only download route
+# -----------------------------
+
+@app.route('/admin/download-sqlite', methods=['GET'])
+@login_required
+def download_sqlite():
+    if current_user.role != 'admin':
+        abort(403)
+
+    uri = app.config.get("SQLALCHEMY_DATABASE_URI", "")
+    sqlite_path = _resolve_sqlite_path(uri)
+    if sqlite_path is None:
+        abort(400, description="This service is not using a file-based SQLite DB (or it's in-memory). Nothing to download.")
+
+    # If the file doesn't exist yet, create it by opening a connection (materialize the file)
+    if not os.path.exists(sqlite_path):
+        try:
+            with db.engine.begin():
+                pass
+            if not os.path.exists(sqlite_path):
+                import sqlite3
+                sqlite3.connect(sqlite_path).close()
+        except Exception as e:
+            print("SQLite touch error:", e)
+
+    if not os.path.exists(sqlite_path):
+        abort(404, description=f"SQLite database file not found at: {sqlite_path}")
+
+    fname = f"db_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.sqlite"
+    return send_file(
+        sqlite_path,
+        as_attachment=True,
+        download_name=fname,
+        mimetype='application/octet-stream'
+    )
+
+
+@app.route('/admin/diag-db', methods=['GET'])
+@login_required
+def diag_db():
+    if current_user.role != 'admin':
+        abort(403)
+
+    uri = app.config.get("SQLALCHEMY_DATABASE_URI", "")
+    try:
+        url = make_url(uri)
+        db_part = url.database
+    except Exception:
+        url = None
+        db_part = None
+
+    candidate_basedir = os.path.abspath(os.path.join(BASEDIR, db_part or "")) if db_part else None
+    candidate_cwd     = os.path.abspath(os.path.join(os.getcwd(), db_part or "")) if db_part else None
+    resolved          = _resolve_sqlite_path(uri)
+
+    return {
+        "cwd": os.getcwd(),
+        "basedir": BASEDIR,
+        "db_uri": uri,
+        "url_parsed": str(url) if url else None,
+        "db_part": db_part,
+        "candidate_basedir": candidate_basedir,
+        "candidate_basedir_exists": os.path.exists(candidate_basedir) if candidate_basedir else None,
+        "candidate_cwd": candidate_cwd,
+        "candidate_cwd_exists": os.path.exists(candidate_cwd) if candidate_cwd else None,
+        "resolved_sqlite_path": resolved,
+        "resolved_exists": os.path.exists(resolved) if resolved else None
+    }   
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -238,12 +371,10 @@ def submit():
     db.session.add(new_request)
     db.session.commit()
 
-
 # Send email via Gmail SMTP
     send_email(new_request.name, new_request.role, new_request.start_time, new_request.end_time, new_request.status)
 # Return JSON response
     return jsonify({'status': 'success'})
-
 
 @app.route('/update_status/<int:request_id>', methods=['POST'])
 @login_required
@@ -297,6 +428,22 @@ if __name__ == '__main__':
 
         db.session.commit()
 
+        # --- NEW: force-create the SQLite file if using sqlite:/// and it's not present ---
+        p = _resolve_sqlite_path(app.config["SQLALCHEMY_DATABASE_URI"])
+        if p and not os.path.exists(p):
+            try:
+                # Open a DB connection (no-op transaction) — this materializes the SQLite file.
+                with db.engine.begin():
+                    pass
+                # If for some reason that still didn't materialize, fall back to a direct sqlite3 touch:
+                if not os.path.exists(p):
+                    import sqlite3
+                    sqlite3.connect(p).close()
+                print(f"SQLite file created at: {p}")
+            except Exception as e:
+                print("SQLite touch error at startup:", e)
+    
+    
     # ✅ Use Render's PORT environment variable
     port = int(os.environ.get('PORT', 5000))  # Default to 5000 for local
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)

@@ -21,6 +21,12 @@
 <body>
     <h1>ADMIN Workstation Queue Dashboard</h1>
 
+    {% if current_user.is_authenticated and current_user.role == 'admin' %}
+      <div style="margin: 10px 0;">
+        <a class="submit-btn" href="{{ url_for('download_sqlite') }}">💾 Save / Download SQLite DB</a>
+      </div>
+    {% endif %}
+
     <h2>📊 Workstation Usage Over Time</h2>
     <div id="usageChart" style="width:100%;height:400px;"></div>
 
