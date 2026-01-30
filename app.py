@@ -74,6 +74,7 @@ def _resolve_sqlite_path(uri: str) -> str | None:
     if os.path.isabs(db_part):
         return db_part
 
+
     # Relative path -> build candidates
     candidate_instance = os.path.abspath(os.path.join(app.instance_path, db_part))
     candidate_basedir  = os.path.abspath(os.path.join(BASEDIR, db_part))
